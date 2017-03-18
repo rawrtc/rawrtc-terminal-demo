@@ -34,31 +34,6 @@ bool str_to_uint16(
 }
 
 /*
- * Convert string to uint64.
- */
-bool str_to_uint64(
-        uint64_t* const numberp,
-        char* const str
-) {
-    char* end;
-    unsigned long long number = strtoull(str, &end, 10);
-
-    // Check result (this function is insane, srsly...)
-    if (*end != '\0' || (number == ULONG_MAX && errno == ERANGE)) {
-        return false;
-    }
-
-    // Check bounds
-    if (number > UINT64_MAX) {
-        return false;
-    }
-
-    // Done
-    *numberp = (uint64_t) number;
-    return true;
-}
-
-/*
  * Get a dictionary entry and store it in `*valuep`.
  */
 enum rawrtc_code dict_get_entry(
@@ -186,32 +161,6 @@ enum rawrtc_code dict_get_uint16(
 }
 
 /*
- * Get JSON from stdin and parse it to a dictionary.
- * If no data has been entered, return `true`, otherwise `false`.
- */
-bool get_json_stdin(
-        struct odict** const dictp // de-referenced
-) {
-    char buffer[PARAMETERS_MAX_LENGTH];
-    size_t length;
-
-    // Get message from stdin
-    if (!fgets((char*) buffer, PARAMETERS_MAX_LENGTH, stdin)) {
-        EWE("Error polling stdin");
-    }
-    length = strlen(buffer);
-
-    // Exit?
-    if (length == 1 && buffer[0] == '\n') {
-        return true;
-    }
-
-    // Decode JSON
-    EOR(json_decode_odict(dictp, 16, buffer, length, 3));
-    return false;
-}
-
-/*
  * Get the ICE role from a string.
  */
 enum rawrtc_code get_ice_role(
@@ -245,30 +194,6 @@ static void data_channel_helper_destroy(
     // Un-reference
     mem_deref(channel->label);
     mem_deref(channel->channel);
-}
-
-/*
- * Create a data channel helper instance.
- */
-void data_channel_helper_create(
-        struct data_channel_helper** const channel_helperp, // de-referenced
-        struct client* const client,
-        char* const label
-) {
-    // Allocate
-    struct data_channel_helper* const channel =
-            mem_zalloc(sizeof(*channel), data_channel_helper_destroy);
-    if (!channel) {
-        EOE(RAWRTC_CODE_NO_MEMORY);
-        return;
-    }
-
-    // Set fields
-    channel->client = client;
-    EOE(rawrtc_strdup(&channel->label, label));
-
-    // Set pointer & done
-    *channel_helperp = channel;
 }
 
 /*
@@ -318,29 +243,4 @@ void data_channel_helper_create_from_channel(
 
     // Un-reference & done
     mem_deref(parameters);
-}
-
-/*
- * Add the ICE candidate to the remote ICE transport if the ICE
- * candidate type is enabled.
- */
-void add_to_other_if_ice_candidate_type_enabled(
-        struct client* const client,
-        struct rawrtc_ice_candidate* const candidate,
-        struct rawrtc_ice_transport* const transport
-) {
-    if (candidate) {
-        enum rawrtc_ice_candidate_type type;
-
-        // Get ICE candidate type
-        EOE(rawrtc_ice_candidate_get_type(&type, candidate));
-
-        // Add to other client as remote candidate (if type enabled)
-        if (ice_candidate_type_enabled(client, type)) {
-            EOE(rawrtc_ice_transport_add_remote_candidate(transport, candidate));
-        }
-    } else {
-        // Last candidate is always being added
-        EOE(rawrtc_ice_transport_add_remote_candidate(transport, candidate));
-    }
 }

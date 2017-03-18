@@ -36,15 +36,6 @@ void set_sctp_parameters(
 );
 
 /*
- * Set SCTP redirect parameters in dictionary.
- */
-void set_sctp_redirect_parameters(
-    struct rawrtc_sctp_redirect_transport* const transport,
-    struct sctp_parameters* const parameters,
-    struct odict* const dict
-);
-
-/*
  * Get ICE parameters from dictionary.
  */
 enum rawrtc_code get_ice_parameters(

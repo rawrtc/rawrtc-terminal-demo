@@ -6,7 +6,7 @@
 #include "helper/handler.h"
 #include "helper/parameters.h"
 
-#define DEBUG_MODULE "data-channel-sctp-echo-app"
+#define DEBUG_MODULE "rawrtc-terminal"
 #define DEBUG_LEVEL 7
 #include <re_dbg.h>
 
@@ -33,6 +33,7 @@ struct data_channel_sctp_client {
     char* name;
     char** ice_candidate_types;
     size_t n_ice_candidate_types;
+    char* shell;
     char* ws_url;
     struct rawrtc_ice_gather_options* gather_options;
     enum rawrtc_ice_role role;
@@ -51,7 +52,7 @@ struct data_channel_sctp_client {
     struct parameters remote_parameters;
 };
 
-// Note: Shwadows struct data_channel_helper
+// Note: Shadows struct data_channel_helper
 struct data_channel_sctp_client_data_channel_helper {
     struct rawrtc_data_channel* channel;
     char* label;
@@ -362,6 +363,8 @@ static void data_channel_open_handler(
         void* const arg // will be casted to `struct data_channel_helper*`
 ) {
     struct data_channel_sctp_client_data_channel_helper* const channel = arg;
+    struct data_channel_sctp_client* const client =
+            (struct data_channel_sctp_client* const) channel->client;
     pid_t pid;
     int parent_write_pipe[2];
     int parent_read_pipe[2];
@@ -380,8 +383,7 @@ static void data_channel_open_handler(
 
     // Child process
     if (pid == 0) {
-        // TODO: Get child arguments and file from parent arguments
-        char* const args[] = {"bash", NULL};
+        char* const args[] = {client->shell, NULL};
 
         // Map stdin to read end of the parent's write pipe
         EOP(dup2(parent_write_pipe[0], STDIN_FILENO));
@@ -482,8 +484,7 @@ static void client_init(
 
     // Create DTLS transport
     EOE(rawrtc_dtls_transport_create(
-            &client->dtls_transport, client->ice_transport, certificates,
-            sizeof(certificates) / sizeof(certificates[0]),
+            &client->dtls_transport, client->ice_transport, certificates, ARRAY_SIZE(certificates),
             default_dtls_transport_state_change_handler, default_dtls_transport_error_handler,
             client));
 
@@ -603,8 +604,8 @@ static void client_get_parameters(
 }
 
 static void exit_with_usage(char* program) {
-    DEBUG_WARNING("Usage: %s <0|1 (ice-role)> [<sctp-port>] [<ws-url>] [<ice-candidate-type> ...]",
-                  program);
+    DEBUG_WARNING("Usage: %s <0|1 (ice-role)> [<sctp-port>] [<shell>] [<ws-url>] "
+                  "[<ice-candidate-type> ...]", program);
     exit(1);
 }
 
@@ -617,6 +618,7 @@ int main(int argc, char* argv[argc + 1]) {
                                           "stun:stun1.l.google.com:19302"};
     char* const turn_threema_ch_urls[] = {"turn:turn.threema.ch:443"};
     struct data_channel_sctp_client client = {0};
+    (void) client.ice_candidate_types; (void) client.n_ice_candidate_types;
 
     // Initialise
     EOE(rawrtc_init());
@@ -640,17 +642,24 @@ int main(int argc, char* argv[argc + 1]) {
         exit_with_usage(argv[0]);
     }
 
-    // Get WS URL (optional)
+    // Get shell (optional)
     if (argc >= 4) {
-        EOE(rawrtc_sdprintf(&client.ws_url, argv[3]));
+        EOE(rawrtc_sdprintf(&client.shell, argv[3]));
+    } else {
+        EOE(rawrtc_sdprintf(&client.shell, "bash"));
+    }
+
+    // Get WS URL (optional)
+    if (argc >= 5) {
+        EOE(rawrtc_sdprintf(&client.ws_url, argv[4]));
     } else {
         EOE(rawrtc_sdprintf(&client.ws_url, "ws://217.160.182.235:9765/shell-o-mat/0"));
     }
 
     // Get enabled ICE candidate types to be added (optional)
-    if (argc >= 5) {
-        ice_candidate_types = &argv[4];
-        n_ice_candidate_types = (size_t) argc - 4;
+    if (argc >= 6) {
+        ice_candidate_types = &argv[5];
+        n_ice_candidate_types = (size_t) argc - 5;
     }
 
     // Create ICE gather options

@@ -4,9 +4,9 @@
 #include "utils.h"
 #include "parameters.h"
 
-#define DEBUG_MODULE "helper-parameters"
-#define DEBUG_LEVEL 7
-#include <re_dbg.h>
+//#define DEBUG_MODULE "helper-parameters"
+//#define DEBUG_LEVEL 7
+//#include <re_dbg.h>
 
 /*
  * Set ICE parameters in dictionary.
@@ -180,26 +180,6 @@ void set_sctp_parameters(
     // Get values
     EOE(rawrtc_sctp_capabilities_get_max_message_size(&max_message_size, parameters->capabilities));
     EOE(rawrtc_sctp_transport_get_port(&port, transport));
-
-    // Set ICE parameters
-    EOR(odict_entry_add(dict, "maxMessageSize", ODICT_INT, max_message_size));
-    EOR(odict_entry_add(dict, "port", ODICT_INT, port));
-}
-
-/*
- * Set SCTP redirect parameters in dictionary.
- */
-void set_sctp_redirect_parameters(
-        struct rawrtc_sctp_redirect_transport* const transport,
-        struct sctp_parameters* const parameters,
-        struct odict* const dict
-) {
-    uint64_t max_message_size;
-    uint16_t port;
-
-    // Get values
-    EOE(rawrtc_sctp_capabilities_get_max_message_size(&max_message_size, parameters->capabilities));
-    EOE(rawrtc_sctp_redirect_transport_get_port(&port, transport));
 
     // Set ICE parameters
     EOR(odict_entry_add(dict, "maxMessageSize", ODICT_INT, max_message_size));

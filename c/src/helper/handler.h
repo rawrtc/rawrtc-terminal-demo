@@ -110,26 +110,8 @@ void default_data_channel_close_handler(
 );
 
 /*
- * Print the data channel's received message's size.
- */
-void default_data_channel_message_handler(
-    struct mbuf* const buffer,
-    enum rawrtc_data_channel_message_flag const flags,
-    void* const arg // will be casted to `struct data_channel_helper*`
-);
-
-/*
  * Stop the main loop.
  */
 void default_signal_handler(
     int sig
-);
-
-/*
- * FD-listener that stops the main loop in case the input buffer is
- * empty.
- */
-void stop_on_return_handler(
-    int flags,
-    void* arg
 );

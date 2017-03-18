@@ -176,21 +176,6 @@ void default_data_channel_close_handler(
 }
 
 /*
- * Print the data channel's received message's size.
- */
-void default_data_channel_message_handler(
-        struct mbuf* const buffer,
-        enum rawrtc_data_channel_message_flag const flags,
-        void* const arg // will be casted to `struct data_channel_helper*`
-) {
-    struct data_channel_helper* const channel = arg;
-    struct client* const client = channel->client;
-    (void) flags;
-    DEBUG_PRINTF("(%s) Incoming message for data channel %s: %zu bytes\n",
-                 client->name, channel->label, mbuf_get_left(buffer));
-}
-
-/*
  * Stop the main loop.
  */
 void default_signal_handler(
@@ -198,31 +183,4 @@ void default_signal_handler(
 ) {
     DEBUG_INFO("Got signal: %d, terminating...\n", sig);
     re_cancel();
-}
-
-/*
- * FD-listener that stops the main loop in case the input buffer
- * contains a line feed or a carriage return.
- */
-void stop_on_return_handler(
-        int flags,
-        void* arg
-) {
-    char buffer[128];
-    size_t length;
-    (void) flags;
-    (void) arg;
-
-    // Get message from stdin
-    if (!fgets((char*) buffer, 128, stdin)) {
-        EOR(errno);
-    }
-    length = strlen(buffer);
-
-    // Exit?
-    if (length > 0 && length < 3 && (buffer[0] == '\n' || buffer[0] == '\r')) {
-        // Stop main loop
-        DEBUG_INFO("Exiting\n");
-        re_cancel();
-    }
 }
