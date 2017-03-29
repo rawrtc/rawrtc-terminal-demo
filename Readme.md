@@ -151,7 +151,8 @@ Before we can go ahead, we need to choose between two modes:
   can be activated by supplying a valid WebSocket URI which has been explained
   in the [`ws-uri` argument description](#ws-uri).
 
-1. Open the [web terminal] in a WebRTC data channel capable browser.
+1. Open the [web terminal][web-terminal] in a WebRTC data channel capable
+   browser.
 2. Start the RAWRTC terminal application.
 3. Exchange the signalling data:
    * In **Copy & Paste mode**, copy the JSON blob after `Local Parameters:`
