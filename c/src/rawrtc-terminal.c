@@ -14,7 +14,8 @@ enum {
     PIPE_READ_BUFFER = 4096
 };
 
-char const NL[] = "\n";
+static char const NL[] = "\n";
+static char const ws_uri_regex[] = "ws:[^]*";
 
 struct pipe {
     int read;
@@ -29,12 +30,12 @@ struct parameters {
 };
 
 // Note: Shadows struct client
-struct data_channel_sctp_client {
+struct terminal_client {
     char* name;
     char** ice_candidate_types;
     size_t n_ice_candidate_types;
     char* shell;
-    char* ws_url;
+    char* ws_uri;
     struct rawrtc_ice_gather_options* gather_options;
     enum rawrtc_ice_role role;
     struct dnsc* dns_client;
@@ -53,7 +54,7 @@ struct data_channel_sctp_client {
 };
 
 // Note: Shadows struct data_channel_helper
-struct data_channel_sctp_client_data_channel_helper {
+struct terminal_client_data_channel_helper {
     struct rawrtc_data_channel* channel;
     char* label;
     struct client* client;
@@ -63,15 +64,25 @@ struct data_channel_sctp_client_data_channel_helper {
 };
 
 static void client_start_transports(
-    struct data_channel_sctp_client* const client
+    struct terminal_client* const client
 );
 
-static void client_set_parameters(
-    struct data_channel_sctp_client* const client
+static void client_stop(
+    struct terminal_client* const client
 );
 
-static void client_get_parameters(
-    struct data_channel_sctp_client* const client
+static void client_apply_parameters(
+    struct terminal_client* const client
+);
+
+static enum rawrtc_code client_decode_parameters(
+    struct parameters* const parametersp,
+    struct odict* const dict,
+    struct terminal_client* const client
+);
+
+static struct odict* client_encode_parameters(
+    struct terminal_client* const client
 );
 
 /*
@@ -81,7 +92,7 @@ static void ws_close_handler(
         int err,
         void* arg
 ) {
-    struct data_channel_sctp_client* const client = arg;
+    struct terminal_client* const client = arg;
     DEBUG_PRINTF("(%s) WS connection closed, reason: %m\n", client->name, err);
 }
 
@@ -93,14 +104,9 @@ static void ws_receive_handler(
         struct mbuf* buffer,
         void* arg
 ) {
-    struct data_channel_sctp_client* const client = arg;
-    struct odict* dict = NULL;
-    struct odict* node = NULL;
-    enum rawrtc_code error = RAWRTC_CODE_SUCCESS;
-    struct rawrtc_ice_parameters* ice_parameters = NULL;
-    struct rawrtc_ice_candidates* ice_candidates = NULL;
-    struct rawrtc_dtls_parameters* dtls_parameters = NULL;
-    struct sctp_parameters sctp_parameters = {0};
+    struct terminal_client* const client = arg;
+    enum rawrtc_code error;
+    struct odict* dict;
     (void) header;
     DEBUG_PRINTF("(%s) WS message of %zu bytes received\n", client->name, mbuf_get_left(buffer));
 
@@ -111,44 +117,24 @@ static void ws_receive_handler(
     }
 
     // Decode JSON
-    EOR(json_decode_odict(&dict, 16, (char*) mbuf_buf(buffer), mbuf_get_left(buffer), 3));
-
-    // Decode content
-    error |= dict_get_entry(&node, dict, "iceParameters", ODICT_OBJECT, true);
-    error |= get_ice_parameters(&ice_parameters, node);
-    error |= dict_get_entry(&node, dict, "iceCandidates", ODICT_ARRAY, true);
-    error |= get_ice_candidates(&ice_candidates, node, arg);
-    error |= dict_get_entry(&node, dict, "dtlsParameters", ODICT_OBJECT, true);
-    error |= get_dtls_parameters(&dtls_parameters, node);
-    error |= dict_get_entry(&node, dict, "sctpParameters", ODICT_OBJECT, true);
-    error |= get_sctp_parameters(&sctp_parameters, node);
-
-    // Ok?
+    error = rawrtc_error_to_code(json_decode_odict(
+            &dict, 16, (char*) mbuf_buf(buffer), mbuf_get_left(buffer), 3));
     if (error) {
         DEBUG_WARNING("(%s) Invalid remote parameters\n", client->name);
-        if (sctp_parameters.capabilities) {
-            mem_deref(sctp_parameters.capabilities);
-        }
-        goto out;
+        return;
     }
 
-    // Set parameters & start transports
-    client->remote_parameters.ice_parameters = mem_ref(ice_parameters);
-    client->remote_parameters.ice_candidates = mem_ref(ice_candidates);
-    client->remote_parameters.dtls_parameters = mem_ref(dtls_parameters);
-    memcpy(&client->remote_parameters.sctp_parameters, &sctp_parameters, sizeof(sctp_parameters));
-    DEBUG_INFO("(%s) Applying remote parameters\n", client->name);
-    client_set_parameters(client);
-    client_start_transports(client);
+    // Decode parameters
+    if (client_decode_parameters(&client->remote_parameters, dict, client) == RAWRTC_CODE_SUCCESS) {
+        // Set parameters & start transports
+        client_apply_parameters(client);
+        client_start_transports(client);
 
-out:
-    // Close WS connection
-    EOR(websock_close(client->ws_connection, WEBSOCK_GOING_AWAY, "Cya!"));
+        // Close WS connection
+        EOR(websock_close(client->ws_connection, WEBSOCK_GOING_AWAY, "Cya!"));
+    }
 
-    // Dereference
-    mem_deref(dtls_parameters);
-    mem_deref(ice_candidates);
-    mem_deref(ice_parameters);
+    // Un-reference
     mem_deref(dict);
 }
 
@@ -158,40 +144,76 @@ out:
 static void ws_established_handler(
         void* arg
 ) {
-    struct data_channel_sctp_client* const client = arg;
+    struct terminal_client* const client = arg;
     struct odict* dict;
-    struct odict* node;
     DEBUG_PRINTF("(%s) WS connection established\n", client->name);
 
-    // Get local parameters
-    client_get_parameters(client);
+    // Encode parameters
+    dict = client_encode_parameters(client);
 
-    // Create dict
-    EOR(odict_alloc(&dict, 16));
-
-    // Create nodes
-    EOR(odict_alloc(&node, 16));
-    set_ice_parameters(client->local_parameters.ice_parameters, node);
-    EOR(odict_entry_add(dict, "iceParameters", ODICT_OBJECT, node));
-    mem_deref(node);
-    EOR(odict_alloc(&node, 16));
-    set_ice_candidates(client->local_parameters.ice_candidates, node);
-    EOR(odict_entry_add(dict, "iceCandidates", ODICT_ARRAY, node));
-    mem_deref(node);
-    EOR(odict_alloc(&node, 16));
-    set_dtls_parameters(client->local_parameters.dtls_parameters, node);
-    EOR(odict_entry_add(dict, "dtlsParameters", ODICT_OBJECT, node));
-    mem_deref(node);
-    EOR(odict_alloc(&node, 16));
-    set_sctp_parameters(client->sctp_transport, &client->local_parameters.sctp_parameters, node);
-    EOR(odict_entry_add(dict, "sctpParameters", ODICT_OBJECT, node));
-    mem_deref(node);
-
-    // Send JSON
+    // Send as JSON
     DEBUG_INFO("(%s) Sending local parameters\n", client->name);
     EOR(websock_send(client->ws_connection, WEBSOCK_TEXT, "%H", json_encode_odict, dict));
 
-    // Dereference
+    // Un-reference
+    mem_deref(dict);
+}
+
+/*
+ * Parse the JSON encoded remote parameters and apply them.
+ */
+static void stdin_receive_handler(
+        int flags,
+        void* arg
+) {
+    struct terminal_client* const client = arg;
+    struct odict* dict = NULL;
+    enum rawrtc_code error;
+    (void) flags;
+
+    // Get dict from JSON
+    error = get_json_stdin(&dict);
+    if (error) {
+        goto out;
+    }
+
+    // Decode parameters
+    if (client_decode_parameters(&client->remote_parameters, dict, client) == RAWRTC_CODE_SUCCESS) {
+        // Set parameters & start transports
+        client_apply_parameters(client);
+        client_start_transports(client);
+    }
+
+out:
+    // Un-reference
+    mem_deref(dict);
+
+    // Exit?
+    if (error == RAWRTC_CODE_NO_VALUE) {
+        DEBUG_NOTICE("Exiting\n");
+
+        // Stop client & bye
+        client_stop(client);
+        before_exit();
+        exit(0);
+    }
+}
+
+/*
+ * Print the JSON encoded local parameters for the other peer.
+ */
+static void print_local_parameters(
+        struct terminal_client* const client
+) {
+    struct odict* dict;
+
+    // Encode parameters
+    dict = client_encode_parameters(client);
+
+    // Print as JSON
+    DEBUG_INFO("Local Parameters:\n%H\n", json_encode_odict, dict);
+
+    // Un-reference
     mem_deref(dict);
 }
 
@@ -204,18 +226,22 @@ static void ice_gatherer_local_candidate_handler(
         char const * const url, // read-only
         void* const arg
 ) {
-    struct data_channel_sctp_client* const client = arg;
+    struct terminal_client* const client = arg;
 
     // Print local candidate
     default_ice_gatherer_local_candidate_handler(candidate, url, arg);
 
-    // Connect to WS server (if last candidate)
+    // Print or send local parameters (if last candidate)
     if (!candidate) {
-        EOR(websock_connect(
+        if (client->ws_socket) {
+            EOR(websock_connect(
                 &client->ws_connection, client->ws_socket, client->http_client,
-                client->ws_url, 30000,
+                client->ws_uri, 30000,
                 ws_established_handler, ws_receive_handler, ws_close_handler,
                 client, NULL));
+        } else {
+            print_local_parameters(client);
+        }
     }
 }
 
@@ -228,9 +254,9 @@ void data_channel_message_handler(
         enum rawrtc_data_channel_message_flag const flags,
         void* const arg // will be casted to `struct data_channel_helper*`
 ) {
-    struct data_channel_sctp_client_data_channel_helper* const channel = arg;
-    struct data_channel_sctp_client* const client =
-            (struct data_channel_sctp_client* const) channel->client;
+    struct terminal_client_data_channel_helper* const channel = arg;
+    struct terminal_client* const client =
+            (struct terminal_client* const) channel->client;
     size_t const length = mbuf_get_left(buffer);
     (void) flags;
     DEBUG_PRINTF("(%s.%s) Received %zu bytes\n", client->name, channel->label, length);
@@ -248,7 +274,7 @@ void data_channel_message_handler(
  * Stop the forked process.
  */
 static void stop_process(
-        struct data_channel_sctp_client_data_channel_helper* const channel
+        struct terminal_client_data_channel_helper* const channel
 ) {
     // Close read pipe (if not already closed)
     if (channel->pipe.read != -1) {
@@ -287,7 +313,7 @@ static void stop_process(
 static void data_channel_error_handler(
         void* const arg // will be casted to `struct data_channel_helper*`
 ) {
-    struct data_channel_sctp_client_data_channel_helper* const channel = arg;
+    struct terminal_client_data_channel_helper* const channel = arg;
 
     // Print error event
     default_data_channel_error_handler(arg);
@@ -302,7 +328,7 @@ static void data_channel_error_handler(
 void data_channel_close_handler(
         void* const arg // will be casted to `struct data_channel_helper*`
 ) {
-    struct data_channel_sctp_client_data_channel_helper* const channel = arg;
+    struct terminal_client_data_channel_helper* const channel = arg;
 
     // Print close event
     default_data_channel_close_handler(arg);
@@ -318,9 +344,9 @@ static void pipe_read_handler(
         int flags,
         void* arg
 ) {
-    struct data_channel_sctp_client_data_channel_helper* const channel = arg;
-    struct data_channel_sctp_client* const client =
-            (struct data_channel_sctp_client* const) channel->client;
+    struct terminal_client_data_channel_helper* const channel = arg;
+    struct terminal_client* const client =
+            (struct terminal_client* const) channel->client;
     ssize_t length;
     (void) flags;
 
@@ -362,9 +388,9 @@ static void pipe_read_handler(
 static void data_channel_open_handler(
         void* const arg // will be casted to `struct data_channel_helper*`
 ) {
-    struct data_channel_sctp_client_data_channel_helper* const channel = arg;
-    struct data_channel_sctp_client* const client =
-            (struct data_channel_sctp_client* const) channel->client;
+    struct terminal_client_data_channel_helper* const channel = arg;
+    struct terminal_client* const client =
+            (struct terminal_client* const) channel->client;
     pid_t pid;
     int parent_write_pipe[2];
     int parent_read_pipe[2];
@@ -424,8 +450,8 @@ static void data_channel_handler(
         struct rawrtc_data_channel* const channel, // read-only, MUST be referenced when used
         void* const arg // will be casted to `struct client*`
 ) {
-    struct data_channel_sctp_client* const client = arg;
-    struct data_channel_sctp_client_data_channel_helper* channel_helper;
+    struct terminal_client* const client = arg;
+    struct terminal_client_data_channel_helper* channel_helper;
 
     // Print channel
     default_data_channel_handler(channel, arg);
@@ -453,18 +479,20 @@ static void data_channel_handler(
 }
 
 static void client_init(
-        struct data_channel_sctp_client* const client
+        struct terminal_client* const client
 ) {
     struct rawrtc_certificate* certificates[1];
 
-    // Create DNS client
-    EOR(dnsc_alloc(&client->dns_client, NULL, NULL, 0));
+    if (client->ws_uri) {
+        // Create DNS client
+        EOR(dnsc_alloc(&client->dns_client, NULL, NULL, 0));
 
-    // Create HTTP client
-    EOR(http_client_alloc(&client->http_client, client->dns_client));
+        // Create HTTP client
+        EOR(http_client_alloc(&client->http_client, client->dns_client));
 
-    // Create WS Socket
-    EOR(websock_alloc(&client->ws_socket, NULL, client));
+        // Create WS Socket
+        EOR(websock_alloc(&client->ws_socket, NULL, client));
+    }
 
     // Generate certificates
     EOE(rawrtc_certificate_generate(&client->certificate, NULL));
@@ -500,16 +528,17 @@ static void client_init(
 }
 
 static void client_start_gathering(
-        struct data_channel_sctp_client* const client
+        struct terminal_client* const client
 ) {
     // Start gathering
     EOE(rawrtc_ice_gatherer_gather(client->gatherer, NULL));
 }
 
 static void client_start_transports(
-        struct data_channel_sctp_client* const client
+        struct terminal_client* const client
 ) {
     struct parameters* const remote_parameters = &client->remote_parameters;
+    DEBUG_INFO("(%s) Starting transports\n", client->name);
 
     // Start ICE transport
     EOE(rawrtc_ice_transport_start(
@@ -529,7 +558,7 @@ static void client_start_transports(
 static void parameters_destroy(
         struct parameters* const parameters
 ) {
-    // Dereference
+    // Un-reference
     parameters->ice_parameters = mem_deref(parameters->ice_parameters);
     parameters->ice_candidates = mem_deref(parameters->ice_candidates);
     parameters->dtls_parameters = mem_deref(parameters->dtls_parameters);
@@ -540,8 +569,10 @@ static void parameters_destroy(
 }
 
 static void client_stop(
-        struct data_channel_sctp_client* const client
+        struct terminal_client* const client
 ) {
+    DEBUG_INFO("(%s) Stopping transports\n", client->name);
+
     // Clear data channels
     list_flush(&client->data_channels);
 
@@ -551,7 +582,10 @@ static void client_stop(
     EOE(rawrtc_ice_transport_stop(client->ice_transport));
     EOE(rawrtc_ice_gatherer_close(client->gatherer));
 
-    // Dereference & close
+    // Stop listening on STDIN
+    fd_close(STDIN_FILENO);
+
+    // Un-reference & close
     parameters_destroy(&client->remote_parameters);
     parameters_destroy(&client->local_parameters);
     client->ws_connection = mem_deref(client->ws_connection);
@@ -565,13 +599,15 @@ static void client_stop(
     client->http_client = mem_deref(client->http_client);
     client->dns_client = mem_deref(client->dns_client);
     client->gather_options = mem_deref(client->gather_options);
-    client->ws_url = mem_deref(client->ws_url);
+    client->ws_uri = mem_deref(client->ws_uri);
+    client->shell = mem_deref(client->shell);
 }
 
-static void client_set_parameters(
-        struct data_channel_sctp_client* const client
+static void client_apply_parameters(
+        struct terminal_client* const client
 ) {
     struct parameters* const remote_parameters = &client->remote_parameters;
+    DEBUG_INFO("(%s) Applying remote parameters\n", client->name);
 
     // Set remote ICE candidates
     EOE(rawrtc_ice_transport_set_remote_candidates(
@@ -579,8 +615,48 @@ static void client_set_parameters(
             remote_parameters->ice_candidates->n_candidates));
 }
 
+static enum rawrtc_code client_decode_parameters(
+        struct parameters* const parametersp,
+        struct odict* const dict,
+        struct terminal_client* const client
+) {
+    enum rawrtc_code error = RAWRTC_CODE_SUCCESS;
+    struct odict* node;
+    struct parameters parameters = {0};
+
+    // Decode nodes
+    error |= dict_get_entry(&node, dict, "iceParameters", ODICT_OBJECT, true);
+    error |= get_ice_parameters(&parameters.ice_parameters, node);
+    error |= dict_get_entry(&node, dict, "iceCandidates", ODICT_ARRAY, true);
+    error |= get_ice_candidates(&parameters.ice_candidates, node, (struct client* const) client);
+    error |= dict_get_entry(&node, dict, "dtlsParameters", ODICT_OBJECT, true);
+    error |= get_dtls_parameters(&parameters.dtls_parameters, node);
+    error |= dict_get_entry(&node, dict, "sctpParameters", ODICT_OBJECT, true);
+    error |= get_sctp_parameters(&parameters.sctp_parameters, node);
+
+    // Ok?
+    if (error) {
+        DEBUG_WARNING("(%s) Invalid remote parameters\n", client->name);
+        goto out;
+    }
+
+out:
+    if (error) {
+        // Un-reference
+        mem_deref(parameters.sctp_parameters.capabilities);
+        mem_deref(parameters.dtls_parameters);
+        mem_deref(parameters.ice_candidates);
+        mem_deref(parameters.ice_parameters);
+    } else {
+        // Copy parameters
+        memcpy(parametersp, &parameters, sizeof(parameters));
+    }
+
+    return error;
+}
+
 static void client_get_parameters(
-        struct data_channel_sctp_client* const client
+        struct terminal_client* const client
 ) {
     struct parameters* const local_parameters = &client->local_parameters;
 
@@ -603,8 +679,42 @@ static void client_get_parameters(
             &local_parameters->sctp_parameters.port, client->sctp_transport));
 }
 
+static struct odict* client_encode_parameters(
+        struct terminal_client* const client
+) {
+    struct odict* dict;
+    struct odict* node;
+
+    // Get local parameters
+    client_get_parameters(client);
+
+    // Create dict
+    EOR(odict_alloc(&dict, 16));
+
+    // Create nodes
+    EOR(odict_alloc(&node, 16));
+    set_ice_parameters(client->local_parameters.ice_parameters, node);
+    EOR(odict_entry_add(dict, "iceParameters", ODICT_OBJECT, node));
+    mem_deref(node);
+    EOR(odict_alloc(&node, 16));
+    set_ice_candidates(client->local_parameters.ice_candidates, node);
+    EOR(odict_entry_add(dict, "iceCandidates", ODICT_ARRAY, node));
+    mem_deref(node);
+    EOR(odict_alloc(&node, 16));
+    set_dtls_parameters(client->local_parameters.dtls_parameters, node);
+    EOR(odict_entry_add(dict, "dtlsParameters", ODICT_OBJECT, node));
+    mem_deref(node);
+    EOR(odict_alloc(&node, 16));
+    set_sctp_parameters(client->sctp_transport, &client->local_parameters.sctp_parameters, node);
+    EOR(odict_entry_add(dict, "sctpParameters", ODICT_OBJECT, node));
+    mem_deref(node);
+
+    // Done
+    return dict;
+}
+
 static void exit_with_usage(char* program) {
-    DEBUG_WARNING("Usage: %s <0|1 (ice-role)> [<sctp-port>] [<shell>] [<ws-url>] "
+    DEBUG_WARNING("Usage: %s <0|1 (ice-role)> [<ws-uri>] [<shell>] [<sctp-port>] "
                   "[<ice-candidate-type> ...]", program);
     exit(1);
 }
@@ -617,7 +727,7 @@ int main(int argc, char* argv[argc + 1]) {
     char* const stun_google_com_urls[] = {"stun:stun.l.google.com:19302",
                                           "stun:stun1.l.google.com:19302"};
     char* const turn_threema_ch_urls[] = {"turn:turn.threema.ch:443"};
-    struct data_channel_sctp_client client = {0};
+    struct terminal_client client = {0};
     (void) client.ice_candidate_types; (void) client.n_ice_candidate_types;
 
     // Initialise
@@ -637,9 +747,12 @@ int main(int argc, char* argv[argc + 1]) {
         exit_with_usage(argv[0]);
     }
 
-    // Get SCTP port (optional)
-    if (argc >= 3 && !str_to_uint16(&client.local_parameters.sctp_parameters.port, argv[2])) {
-        exit_with_usage(argv[0]);
+    // Get WS URI (optional)
+    if (argc >= 3 && re_regex(argv[2], strlen(argv[2]), ws_uri_regex, NULL) == 0) {
+        EOE(rawrtc_sdprintf(&client.ws_uri, argv[2]));
+        DEBUG_PRINTF("Using mode: WebSocket\n");
+    } else {
+        DEBUG_PRINTF("Using mode: Copy & Paste\n");
     }
 
     // Get shell (optional)
@@ -648,12 +761,11 @@ int main(int argc, char* argv[argc + 1]) {
     } else {
         EOE(rawrtc_sdprintf(&client.shell, "bash"));
     }
+    DEBUG_PRINTF("Using process: %s\n", client.shell);
 
-    // Get WS URL (optional)
-    if (argc >= 5) {
-        EOE(rawrtc_sdprintf(&client.ws_url, argv[4]));
-    } else {
-        EOE(rawrtc_sdprintf(&client.ws_url, "ws://217.160.182.235:9765/shell-o-mat/0"));
+    // Get SCTP port (optional)
+    if (argc >= 5 && !str_to_uint16(&client.local_parameters.sctp_parameters.port, argv[4])) {
+        exit_with_usage(argv[0]);
     }
 
     // Get enabled ICE candidate types to be added (optional)
@@ -687,6 +799,9 @@ int main(int argc, char* argv[argc + 1]) {
 
     // Start gathering
     client_start_gathering(&client);
+
+    // Listen on stdin
+    EOR(fd_listen(STDIN_FILENO, FD_READ, stdin_receive_handler, &client));
 
     // Start main loop
     // TODO: Wrap re_main?

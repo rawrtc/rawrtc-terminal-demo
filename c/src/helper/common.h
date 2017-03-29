@@ -1,6 +1,10 @@
 #pragma once
 #include <rawrtc.h>
 
+enum {
+    PARAMETERS_MAX_LENGTH = 8192,
+};
+
 /*
  * SCTP parameters that need to be negotiated.
  */

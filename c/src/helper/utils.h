@@ -42,6 +42,13 @@ enum rawrtc_code dict_get_uint16(
 );
 
 /*
+ * Get JSON from stdin and parse it to a dictionary.
+ */
+enum rawrtc_code get_json_stdin(
+    struct odict** const dictp // de-referenced
+);
+
+/*
  * Get the ICE role from a string.
  */
 enum rawrtc_code get_ice_role(
