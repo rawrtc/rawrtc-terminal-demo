@@ -221,6 +221,7 @@ static void data_channel_helper_destroy(
     list_unlink(&channel->le);
 
     // Un-reference
+    mem_deref(channel->arg);
     mem_deref(channel->label);
     mem_deref(channel->channel);
 }
@@ -230,9 +231,9 @@ static void data_channel_helper_destroy(
  */
 void data_channel_helper_create_from_channel(
         struct data_channel_helper** const channel_helperp, // de-referenced
-        size_t const size, // zeroable
         struct rawrtc_data_channel* channel,
-        struct client* const client
+        struct client* const client,
+        void* const arg // nullable
 ) {
     enum rawrtc_code error;
     struct rawrtc_data_channel_parameters* parameters;
@@ -240,7 +241,7 @@ void data_channel_helper_create_from_channel(
 
     // Allocate
     struct data_channel_helper* const channel_helper =
-            mem_zalloc(size > 0 ? size : sizeof(*channel_helper), data_channel_helper_destroy);
+            mem_zalloc(sizeof(*channel_helper), data_channel_helper_destroy);
     if (!channel_helper) {
         EOE(RAWRTC_CODE_NO_MEMORY);
         return;
@@ -266,6 +267,7 @@ void data_channel_helper_create_from_channel(
     // Set fields
     channel_helper->client = client;
     channel_helper->channel = channel;
+    channel_helper->arg = mem_ref(arg);
 
     // Set pointer
     *channel_helperp = channel_helper;

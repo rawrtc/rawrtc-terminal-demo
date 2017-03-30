@@ -37,5 +37,8 @@ include_directories(${LIB_RAWRTC_INCLUDE_DIRS})
 link_directories(${LIB_RAWRTC_LIBRARY_DIRS})
 list(APPEND rawrtc_terminal_DEP_LIBRARIES ${LIB_RAWRTC_LIBRARIES})
 
+# Dependency: lutil (forkpty)
+list(APPEND rawrtc_terminal_DEP_LIBRARIES "util")
+
 # Walk through subdirectories
 add_subdirectory(src)
