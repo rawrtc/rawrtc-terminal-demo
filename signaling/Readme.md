@@ -9,12 +9,12 @@ The most basic signalling server you can get.
 
 We recommend using [venv][venv] to create an isolated Python environment:
 
-    pyvenv venv
+    python3 -m venv signaling-venv
 
-You can switch into the created virtual environment *venv* by running
+You can switch into the created virtual environment *signaling-venv* by running
 this command:
 
-    source venv/bin/activate
+    source signaling-venv/bin/activate
 
 While the virtual environment is active, all packages installed using
 `pip` will be installed into this environment.

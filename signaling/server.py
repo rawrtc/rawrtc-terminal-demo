@@ -7,7 +7,7 @@ import websockets
 
 __author__ = 'Lennart Grahl'
 
-PING_INTERVAL = 60.0
+PING_INTERVAL = 5.0
 PING_TIMEOUT = 10.0
 
 
@@ -16,10 +16,6 @@ class SignalingError(Exception):
 
 
 class MessageFlowError(SignalingError):
-    pass
-
-
-class Disconnected(Exception):
     pass
 
 
@@ -70,7 +66,7 @@ class Path:
 
     def wait_other_client(self, client):
         other_slot = 0 if client.slot is 1 else 1
-        return self.slots[other_slot]
+        return asyncio.shield(self.slots[other_slot], loop=self.loop)
 
     def register_client(self, client):
         # Unregister previous client
@@ -147,7 +143,7 @@ class Server:
     @asyncio.coroutine
     def handle_client(self, path, client):
         # Wait until complete
-        tasks = [self.keep_alive(path, client), self.channel(path, client)]
+        tasks = [self.keep_alive(client), self.channel(path, client)]
         tasks = [self.loop.create_task(coroutine) for coroutine in tasks]
         done, pending = yield from asyncio.wait(
             tasks, loop=self.loop, return_when=asyncio.FIRST_EXCEPTION)
@@ -190,13 +186,9 @@ class Server:
             self.log.debug('Channel cancelled')
 
     @asyncio.coroutine
-    def keep_alive(self, path, client):
+    def keep_alive(self, client):
         try:
             while True:
-                # Check connection
-                if not client.open:
-                    raise Disconnected()
-
                 self.log.debug('Ping to {}', client)
                 try:
                     # Send ping
