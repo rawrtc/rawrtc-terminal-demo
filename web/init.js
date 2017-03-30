@@ -1,7 +1,7 @@
 /*jslint plusplus: true, devel: true, nomen: true, vars: true, continue: true, regexp: true, indent: 4, maxerr: 50, -W007 */
 /*global window, io, $ */
 
-function initClient(io) {
+function initTerminal(io) {
     "use strict";
 
     var socket      = io.connect(),
@@ -64,7 +64,7 @@ function initClient(io) {
     // The exec function
     var exec = function(cmd, callback) {
         var stdout = ''
-        if(!socket){
+        if (!socket) {
             socket = io.connect();
         }
       socket.once("exit", function (data) {
@@ -170,10 +170,10 @@ function initClient(io) {
     var mobile_magic = 0.7;
         if (!scrolling && content.height() > $(window.document).height() * mobile_magic) {
             scrolling = true;
-//            window.setTimeout(function () {
-//                $("html, body").animate({ scrollTop: $(window.document).height() }, 500);
-//                scrolling = false;
-//            }, 10);
+           window.setTimeout(function () {
+               $("html, body").animate({ scrollTop: $(window.document).height() }, 500);
+               scrolling = false;
+           }, 10);
         }
     }
 
@@ -222,9 +222,8 @@ function initClient(io) {
         cursor = uiLineWrp.find("#cursor");
         cursorPos = 0;
 
-    // Trigger a global event
-    $(window).trigger('cursor:ready');
-         $("html, body").animate({ scrollTop: $(window.document).height() }, 1);
+        // Trigger a global event
+        $(window).trigger('cursor:ready');
     }
 
     function addNewLine() {
@@ -236,9 +235,8 @@ function initClient(io) {
         cursor = uiLineWrp.find("#cursor");
         cursorPos = 0;
 
-    // Trigger a global event
-    $(window).trigger('cursor:ready');
-        $("html, body").animate({ scrollTop: $(window.document).height() }, 1);
+        // Trigger a global event
+        $(window).trigger('cursor:ready');
     }
 
     function convertToHtml(data) {

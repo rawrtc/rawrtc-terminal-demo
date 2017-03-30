@@ -173,7 +173,7 @@ Before we can go ahead, we need to choose between two modes:
 [meson]: https://github.com/mesonbuild/meson
 [ninja]: https://ninja-build.org
 
-[web-terminal]: ./web/web-terminal.html
+[web-terminal]: web/index.html
 [rawrtc-terminal]: ./c/src/rawrtc-terminal.c
 [signalling-readme]: ./signaling/Readme.md
 [rawrtc-pkg-path]: https://github.com/rawrtc/rawrtc#package-configuration-path
