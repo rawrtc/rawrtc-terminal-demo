@@ -9,7 +9,8 @@ The frontend is based on the socket.io
 
 ## Introduction
 
-This demo includes two tightly coupled applications:
+This demo includes two tightly coupled applications and an optional signalling
+server:
 
 1. The [web terminal][web-terminal] which can be opened in any modern browser
    that supports WebRTC and WebRTC data channels. It represents a browser-based
@@ -22,7 +23,7 @@ This demo includes two tightly coupled applications:
 3. A very basic WebSocket signalling server written for Python 3.4+ which can
    be used instead of copy & pasting the signalling data from one peer to the
    other. Follow the [signalling server's readme][signalling-readme] for
-   instructions.
+   instructions on how to set up the server.
 
 In the following sections, we will describe how to build the RAWRTC terminal
 backend followed by [usage instructions](#usage) for the combination of the two
@@ -61,7 +62,7 @@ be able to find the RAWRTC library and its dependencies.
 
 #### CMake
 
-    cd <rawrtc-terminal-demo> 
+    cd <rawrtc-terminal-demo>/c
     mkdir build && cd build
     cmake -DCMAKE_INSTALL_PREFIX=${PWD}/prefix ..
     make install

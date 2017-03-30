@@ -131,7 +131,8 @@ static void ws_receive_handler(
         client_start_transports(client);
 
         // Close WS connection
-        EOR(websock_close(client->ws_connection, WEBSOCK_GOING_AWAY, "Cya!"));
+        EOR(websock_close(client->ws_connection, WEBSOCK_NORMAL_CLOSURE, NULL));
+        client->ws_connection = mem_deref(client->ws_connection);
     }
 
     // Un-reference
@@ -581,6 +582,11 @@ static void client_stop(
     EOE(rawrtc_dtls_transport_stop(client->dtls_transport));
     EOE(rawrtc_ice_transport_stop(client->ice_transport));
     EOE(rawrtc_ice_gatherer_close(client->gatherer));
+
+    // Close WS connection
+    if (client->ws_connection) {
+        EOR(websock_close(client->ws_connection, WEBSOCK_GOING_AWAY, NULL));
+    }
 
     // Stop listening on STDIN
     fd_close(STDIN_FILENO);
