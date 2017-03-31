@@ -89,7 +89,7 @@ window.addEventListener('load', (event) => {
 
         static fitTerminal(terminal) {
             // Space above
-            let above = parseInt(content.getBoundingClientRect().top);
+            let above = Math.ceil(content.getBoundingClientRect().top);
 
             // Calculate height & width
             let height = window.innerHeight - above;

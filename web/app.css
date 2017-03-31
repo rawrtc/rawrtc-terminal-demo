@@ -92,7 +92,12 @@ body {
     height: 100%;
 }
 
-/* Note: Hack to remove that ugly scrollbar fragment */
+/* Hack to remove that ugly scrollbar fragment */
 .xterm-viewport {
     visibility: hidden;
+}
+
+/* Fix height of rows */
+.xterm-rows > div {
+    height: 21px;
 }
