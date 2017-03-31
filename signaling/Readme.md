@@ -2,6 +2,9 @@
 
 The most basic signalling server you can get.
 
+Don't even think about using this in production code. We recommend
+[SaltyRTC][saltyrtc] for secure production signalling.
+
 ## Prerequisites
 
 * Python 3.4+
@@ -38,6 +41,7 @@ Run the server with the following command:
 
     python server.py
 
+[saltyrtc]: https://saltyrtc.org
 [pip]: https://pip.pypa.io/en/stable/installing
 [venv]: https://docs.python.org/3/library/venv.html
 [virtualenvwrapper]: https://virtualenvwrapper.readthedocs.io/

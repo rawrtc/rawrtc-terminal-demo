@@ -4,8 +4,7 @@ A browser terminal that uses WebRTC to punch through NATs.
 
 ![RAWRTC Terminal Demo Screenshot][screenshot]
 
-The frontend is based on the socket.io
-[Web-Terminal by rabchev][web-terminal-socketio].
+The frontend uses the amazing [xterm.js][xterm-js].
 
 ## Introduction
 
@@ -117,10 +116,10 @@ If supplied and set to a valid WebSocket URI, the signalling server and the
 WebSocket path supplied in the URI will be used to exchange signalling data.
 The URI is split into three parts: `ws://<hostname-or-ip>/<channel>/<ice-role>`
 
-* *<hostname-or-ip>*: The hostname or IP of the WebSocket server.
-* *<channel>*: A channel name known to both peers. The server buffers and
+* *hostname-or-ip*: The hostname or IP of the WebSocket server.
+* *channel*: A channel name known to both peers. The server buffers and
   relays data on a channel from ICE role `0` to `1` and vice versa.
-* *<ice-role>*: The chosen ICE role of the peer.
+* *ice-role*: The chosen ICE role of the peer.
 
 If not supplied or not a valid WebSocket URI, the copy & paste mode will be
 used.
@@ -158,15 +157,15 @@ Before we can go ahead, we need to choose between two modes:
 3. Exchange the signalling data:
    * In **Copy & Paste mode**, copy the JSON blob after `Local Parameters:`
      from the RAWRTC terminal application into the web terminal. Copy the web
-     terminal's JSON blob into the RAWRTC terminal application. Click on the
-     *Start* button in the web terminal and press *Enter* in the RAWRTC
-     terminal application.
-   * In **WebSocket mode**, enter the correct WebSocket URI in the web terminal
-     and click on the *Start* button.
+     terminal's JSON blob into the RAWRTC terminal application. Press *Enter*
+     in the RAWRTC terminal application.
+   * In **WebSocket mode**, supply the RAWRTC terminal's WebSocket URI as an
+     argument when starting the application and paste the web terminal's
+     WebSocket URI into the web terminal.
 4. Done! Enjoy your WebRTC remote terminal.
 
 [screenshot]: screenshot.png "RAWRTC Terminal Demo Screenshot"
-[web-terminal-socketio]: https://github.com/rabchev/web-terminal
+[xterm-js]: https://github.com/sourcelair/xterm.js
 
 [cmake]: https://cmake.org
 [rawrtc]: https://github.com/rawrtc/rawrtc

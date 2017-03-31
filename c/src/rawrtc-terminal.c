@@ -1,6 +1,10 @@
 #include <string.h> // memcpy
-#include <unistd.h> // STDIN_FILENO, STDOUT_FILENO, pipe, fork, dup2, close, execvp, read, write
+#include <unistd.h> // STDIN_FILENO, STDOUT_FILENO, close, execvp, read, write
+#include <limits.h> // USHRT_MAX
 #include <signal.h> // SIGTERM, kill
+#include <stdlib.h> // setenv
+#include <termios.h> // ioctl, struct winsize
+#include <pty.h> // forkpty
 #include <rawrtc.h>
 #include "helper/utils.h"
 #include "helper/handler.h"
@@ -14,13 +18,17 @@ enum {
     PIPE_READ_BUFFER = 4096
 };
 
-static char const NL[] = "\n";
-static char const ws_uri_regex[] = "ws:[^]*";
-
-struct pipe {
-    int read;
-    int write;
+// Control message types
+enum {
+    CONTROL_MESSAGE_WINDOW_SIZE_TYPE = 0
 };
+
+// Control message lengths
+enum {
+    CONTROL_MESSAGE_WINDOW_SIZE_LENGTH = 5
+};
+
+static char const ws_uri_regex[] = "ws:[^]*";
 
 struct parameters {
     struct rawrtc_ice_parameters* ice_parameters;
@@ -53,14 +61,9 @@ struct terminal_client {
     struct parameters remote_parameters;
 };
 
-// Note: Shadows struct data_channel_helper
-struct terminal_client_data_channel_helper {
-    struct rawrtc_data_channel* channel;
-    char* label;
-    struct client* client;
-    struct le le;
+struct terminal_client_channel {
     pid_t pid;
-    struct pipe pipe;
+    int pty;
 };
 
 static void client_start_transports(
@@ -255,51 +258,97 @@ void data_channel_message_handler(
         enum rawrtc_data_channel_message_flag const flags,
         void* const arg // will be casted to `struct data_channel_helper*`
 ) {
-    struct terminal_client_data_channel_helper* const channel = arg;
+    struct data_channel_helper* const channel = arg;
+    struct terminal_client_channel* const client_channel = channel->arg;
     struct terminal_client* const client =
             (struct terminal_client* const) channel->client;
     size_t const length = mbuf_get_left(buffer);
     (void) flags;
     DEBUG_PRINTF("(%s.%s) Received %zu bytes\n", client->name, channel->label, length);
 
-    // Pipe into forked process's stdin
-    // TODO: Blocking? EAGAIN?
-    DEBUG_PRINTF("(%s.%s) Piping %zu bytes into process...\n",
-                 client->name, channel->label, length);
-    EOP(write(channel->pipe.write, mbuf_buf(buffer), length));
-    EOP(write(channel->pipe.write, NL, sizeof(NL)));
-    DEBUG_PRINTF("(%s.%s) ... completed!\n", client->name, channel->label);
+    if (flags & RAWRTC_DATA_CHANNEL_MESSAGE_FLAG_IS_BINARY) {
+        uint_fast8_t type;
+
+        // Check size
+        if (length < 1) {
+            DEBUG_WARNING("(%s.%s) Invalid control message of size %zu\n",
+                    client->name, channel->label, length);
+            return;
+        }
+
+        // Get type
+        type = mbuf_read_u8(buffer);
+
+        // Handle control message
+        switch (type) {
+            case CONTROL_MESSAGE_WINDOW_SIZE_TYPE:
+                // Check size
+                if (length < CONTROL_MESSAGE_WINDOW_SIZE_LENGTH) {
+                    DEBUG_WARNING("(%s.%s) Invalid window size message of size %zu\n",
+                            client->name, channel->label, length);
+                    return;
+                }
+                {
+                    uint_fast16_t columns;
+                    uint_fast16_t rows;
+                    struct winsize window_size = {0};
+
+                    // Get window size
+                    columns = ntohs(mbuf_read_u16(buffer));
+                    rows = ntohs(mbuf_read_u16(buffer));
+
+                    // Check window size
+#if (UINT16_MAX > USHRT_MAX)
+                    if (columns > USHRT_MAX || rows > USHRT_MAX) {
+                        DEBUG_WARNING("(%s.%s) Invalid window size value\n",
+                                      client->name, channel->label);
+                    }
+#endif
+
+                    // Set window size
+                    window_size.ws_col = (unsigned short) columns;
+                    window_size.ws_row = (unsigned short) rows;
+
+                    // Apply window size
+                    DEBUG_PRINTF("(%s.%s) Resizing terminal to %"PRIuFAST16" columns and "
+                            "%"PRIuFAST16" rows\n", client->name, channel->label, columns, rows);
+                    EOP(ioctl(client_channel->pty, TIOCSWINSZ, &window_size));
+                }
+
+                break;
+            default:
+                DEBUG_WARNING("(%s.%s) Unknown control message %"PRIuFAST8"\n",
+                              client->name, channel->label, length);
+                break;
+        }
+    } else {
+        // Write into PTY
+        // TODO: Handle EAGAIN?
+        DEBUG_PRINTF("(%s.%s) Piping %zu bytes into process...\n",
+                     client->name, channel->label, length);
+        EOP(write(client_channel->pty, mbuf_buf(buffer), length));
+        DEBUG_PRINTF("(%s.%s) ... completed!\n", client->name, channel->label);
+    }
 }
 
 /*
- * Stop the forked process.
+ * Stop the PTY.
  */
 static void stop_process(
-        struct terminal_client_data_channel_helper* const channel
+        struct terminal_client_channel* const channel
 ) {
-    // Close read pipe (if not already closed)
-    if (channel->pipe.read != -1) {
-        // Stop listening on pipe
-        fd_close(channel->pipe.read);
-        EOP(close(channel->pipe.read));
+    // Close PTY (if not already closed)
+    if (channel->pty != -1) {
+        // Stop listening on PTY
+        fd_close(channel->pty);
+        EOP(close(channel->pty));
 
-        // Invalidate pipe
-        channel->pipe.read = -1;
-    }
-
-    // Close write pipe (if not already closed)
-    if (channel->pipe.write != -1) {
-        // Stop listening on pipe
-        EOP(close(channel->pipe.write));
-
-        // Invalidate pipe
-        channel->pipe.write = -1;
+        // Invalidate PTY
+        channel->pty = -1;
     }
 
     // Stop process (if not already stopped)
     if (channel->pid != -1) {
-        DEBUG_INFO("(%s.%s) Stopping process\n", channel->client->name, channel->label);
-
         // Terminate process
         EOP(kill(channel->pid, SIGTERM));
 
@@ -314,13 +363,17 @@ static void stop_process(
 static void data_channel_error_handler(
         void* const arg // will be casted to `struct data_channel_helper*`
 ) {
-    struct terminal_client_data_channel_helper* const channel = arg;
+    struct data_channel_helper* const channel = arg;
+    struct terminal_client_channel* const client_channel = channel->arg;
 
     // Print error event
     default_data_channel_error_handler(arg);
 
     // Stop forked process
-    stop_process(channel);
+    if (client_channel->pid != -1) {
+        DEBUG_INFO("(%s.%s) Stopping process\n", channel->client->name, channel->label);
+    }
+    stop_process(client_channel);
 }
 
 /*
@@ -329,23 +382,28 @@ static void data_channel_error_handler(
 void data_channel_close_handler(
         void* const arg // will be casted to `struct data_channel_helper*`
 ) {
-    struct terminal_client_data_channel_helper* const channel = arg;
+    struct data_channel_helper* const channel = arg;
+    struct terminal_client_channel* const client_channel = channel->arg;
 
     // Print close event
     default_data_channel_close_handler(arg);
 
     // Stop forked process
-    stop_process(channel);
+    if (client_channel->pid != -1) {
+        DEBUG_INFO("(%s.%s) Stopping process\n", channel->client->name, channel->label);
+    }
+    stop_process(client_channel);
 }
 
 /*
- * Send the forked processes's stdout data on the data channel.
+ * Send the PTY's data on the data channel.
  */
-static void pipe_read_handler(
+static void pty_read_handler(
         int flags,
         void* arg
 ) {
-    struct terminal_client_data_channel_helper* const channel = arg;
+    struct data_channel_helper* const channel = arg;
+    struct terminal_client_channel* const client_channel = channel->arg;
     struct terminal_client* const client =
             (struct terminal_client* const) channel->client;
     ssize_t length;
@@ -354,11 +412,21 @@ static void pipe_read_handler(
     // Create buffer
     struct mbuf* const buffer = mbuf_alloc(PIPE_READ_BUFFER);
 
-    // Read from pipe into buffer
-    // TODO: Blocking? EAGAIN?
+    // Read from PTY into buffer
+    // TODO: Handle EAGAIN?
     DEBUG_PRINTF("(%s.%s) Reading from process...\n", client->name, channel->label);
-    length = read(channel->pipe.read, mbuf_buf(buffer), mbuf_get_space(buffer));
-    EOP(length);
+    length = read(client_channel->pty, mbuf_buf(buffer), mbuf_get_space(buffer));
+    if (length == -1) {
+        switch (errno) {
+            case EIO:
+                // This happens when invoking 'exit' or similar commands
+                length = 0;
+                break;
+            default:
+                EOR(errno);
+                break;
+        }
+    }
     mbuf_set_end(buffer, (size_t) length);
     DEBUG_PRINTF("(%s.%s) ... read %zu bytes\n",
                  client->name, channel->label, mbuf_get_left(buffer));
@@ -366,7 +434,10 @@ static void pipe_read_handler(
     // Process terminated?
     if (length == 0) {
         // Stop listening
-        stop_process(channel);
+        if (client_channel->pid != -1) {
+            DEBUG_INFO("(%s.%s) Stopping process\n", channel->client->name, channel->label);
+        }
+        stop_process(client_channel);
 
         // Close data channel
         EOE(rawrtc_data_channel_close(channel->channel));
@@ -389,59 +460,51 @@ static void pipe_read_handler(
 static void data_channel_open_handler(
         void* const arg // will be casted to `struct data_channel_helper*`
 ) {
-    struct terminal_client_data_channel_helper* const channel = arg;
+    struct data_channel_helper* const channel = arg;
+    struct terminal_client_channel* const client_channel = channel->arg;
     struct terminal_client* const client =
             (struct terminal_client* const) channel->client;
     pid_t pid;
-    int parent_write_pipe[2];
-    int parent_read_pipe[2];
+    int pty;
 
     // Print open event
     default_data_channel_open_handler(arg);
 
-    // Create pipes (where 0 is read and 1 is write)
-    EOP(pipe(parent_write_pipe));
-    EOP(pipe(parent_read_pipe));
-
-    // Fork process
+    // Fork to pseudo-terminal
+    // TODO: Check bounds (PID_MAX < INT_MAX...)
     // TODO: Fix leaking FDs
-    pid = fork();
+    DEBUG_INFO("(%s) Starting process for data channel %s\n",
+               channel->client->name, channel->label);
+    pid = (pid_t) forkpty(&pty, NULL, NULL, NULL);
     EOP(pid);
 
     // Child process
     if (pid == 0) {
         char* const args[] = {client->shell, NULL};
 
-        // Map stdin to read end of the parent's write pipe
-        EOP(dup2(parent_write_pipe[0], STDIN_FILENO));
+        // Make it colourful!
+        EOP(setenv("TERM", "xterm-256color", 1));
 
-        // Map stdout to write end of the parent's read pipe
-        EOP(dup2(parent_read_pipe[1], STDOUT_FILENO));
-
-        // Close inherited pipes
-        EOP(close(parent_write_pipe[0]));
-        EOP(close(parent_write_pipe[1]));
-        EOP(close(parent_read_pipe[0]));
-        EOP(close(parent_read_pipe[1]));
-
-        // Run process
-        DEBUG_INFO("(%s) Starting process for data channel %s\n",
-                   channel->client->name, channel->label);
+        // Run terminal
         EOP(execvp(args[0], args));
         EWE("Child process returned!\n");
     }
 
-    // Close pipe ends used by the child
-    EOP(close(parent_write_pipe[0]));
-    EOP(close(parent_read_pipe[1]));
-
     // Set fields
-    channel->pid = pid;
-    channel->pipe.read = parent_read_pipe[0];
-    channel->pipe.write = parent_write_pipe[1];
+    client_channel->pid = pid;
+    client_channel->pty = pty;
 
-    // Listen on pipe
-    EOR(fd_listen(channel->pipe.read, FD_READ, pipe_read_handler, channel));
+    // Listen on PTY
+    EOR(fd_listen(client_channel->pty, FD_READ, pty_read_handler, channel));
+}
+
+static void terminal_client_channel_destroy(
+        void* arg
+) {
+    struct terminal_client_channel* const client_channel = arg;
+
+    // Stop process
+    stop_process(client_channel);
 }
 
 /*
@@ -452,19 +515,27 @@ static void data_channel_handler(
         void* const arg // will be casted to `struct client*`
 ) {
     struct terminal_client* const client = arg;
-    struct terminal_client_data_channel_helper* channel_helper;
+    struct terminal_client_channel* client_channel;
+    struct data_channel_helper* channel_helper;
 
     // Print channel
     default_data_channel_handler(channel, arg);
 
+    // Create terminal client channel instance
+    client_channel = mem_zalloc(sizeof(*client_channel), terminal_client_channel_destroy);
+    if (!client_channel) {
+        EOE(RAWRTC_CODE_NO_MEMORY);
+        return;
+    }
+
+    // Set fields
+    client_channel->pid = -1;
+    client_channel->pty = -1;
+
     // Create data channel helper instance
     // Note: In this case we need to reference the channel because we have not created it
-    data_channel_helper_create_from_channel(
-            (struct data_channel_helper**) &channel_helper, sizeof(*channel_helper),
-            mem_ref(channel), arg);
-
-    // Set PID to invalid
-    channel_helper->pid = -1;
+    data_channel_helper_create_from_channel(&channel_helper, mem_ref(channel), arg, client_channel);
+    mem_deref(client_channel);
 
     // Add to list
     list_append(&client->data_channels, &channel_helper->le, channel_helper);

@@ -259,7 +259,7 @@ class Peer {
             // Set remote description
             this.pc.setRemoteDescription({type: type, sdp: sdp})
             .then(() => {
-                console.log('Remote description:\n' + this.pc.remoteDescription.sdp);
+                console.log('Actual remote description:\n' + this.pc.remoteDescription.sdp);
                 this.remoteDescription = this.pc.remoteDescription;
 
                 // Add ICE candidates
