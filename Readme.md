@@ -4,8 +4,7 @@ A browser terminal that uses WebRTC to punch through NATs.
 
 ![RAWRTC Terminal Demo Screenshot][screenshot]
 
-The frontend is based on the socket.io
-[Web-Terminal by rabchev][web-terminal-socketio].
+The frontend uses the amazing [xterm.js][xterm-js].
 
 ## Introduction
 
@@ -158,15 +157,15 @@ Before we can go ahead, we need to choose between two modes:
 3. Exchange the signalling data:
    * In **Copy & Paste mode**, copy the JSON blob after `Local Parameters:`
      from the RAWRTC terminal application into the web terminal. Copy the web
-     terminal's JSON blob into the RAWRTC terminal application. Click on the
-     *Start* button in the web terminal and press *Enter* in the RAWRTC
-     terminal application.
-   * In **WebSocket mode**, enter the correct WebSocket URI in the web terminal
-     and click on the *Start* button.
+     terminal's JSON blob into the RAWRTC terminal application. Press *Enter*
+     in the RAWRTC terminal application.
+   * In **WebSocket mode**, supply the RAWRTC terminal's WebSocket URI as an
+     argument when starting the application and paste the web terminal's
+     WebSocket URI into the web terminal.
 4. Done! Enjoy your WebRTC remote terminal.
 
 [screenshot]: screenshot.png "RAWRTC Terminal Demo Screenshot"
-[web-terminal-socketio]: https://github.com/rabchev/web-terminal
+[xterm-js]: https://github.com/sourcelair/xterm.js
 
 [cmake]: https://cmake.org
 [rawrtc]: https://github.com/rawrtc/rawrtc

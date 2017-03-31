@@ -12,17 +12,43 @@
 
     <!-- xterm.js -->
     <link rel="stylesheet" href="node_modules/xterm/dist/xterm.css" />
+
+    <!-- App -->
+    <link rel="stylesheet" href="app.css" />
 </head>
 <body>
-    <button type="button" onclick="startWS();">Start (WebSocket)</button>
-    <input type="text" size="50" value="ws://127.0.0.1:9765/shell-o-mat/1" id="ws-url" />
-    <div id="terminal"></div>
+    <div id="wrapper">
+        <div id="status-bar" class="red"></div>
+
+        <div id="navigation">
+            <div id="l-connection" class="active">
+                <b>Connection</b>
+            </div>
+
+            <div id="l-add">+</div>
+        </div>
+
+        <div id="content">
+            <section id="connection" class="show">
+                <div id="paste-here" contenteditable="true">
+                    Paste a WebSocket URI or the remote parameters here.
+                </div>
+
+                <span>Local Parameters</span>
+                <pre class="parameters" id="local-parameters"></pre>
+
+                <span>Remote Parameters</span>
+                <pre class="parameters" id="remote-parameters"></pre>
+            </section>
+        </div>
+    </div>
 
     <!-- AdapterJS -->
     <script src="node_modules/webrtc-adapter/out/adapter.js"></script>
 
     <!-- xterm.js -->
     <script src="node_modules/xterm/dist/xterm.js"></script>
+    <script src="node_modules/xterm/dist/addons/fit/fit.js"></script>
 
     <!-- WebRTC-to-RAWRTC shim -->
     <script src="sdp.js"></script>

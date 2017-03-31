@@ -1,7 +1,9 @@
 #include <string.h> // memcpy
-#include <unistd.h> // STDIN_FILENO, STDOUT_FILENO, pipe, fork, dup2, close, execvp, read, write
+#include <unistd.h> // STDIN_FILENO, STDOUT_FILENO, close, execvp, read, write
+#include <limits.h> // USHRT_MAX
 #include <signal.h> // SIGTERM, kill
 #include <stdlib.h> // setenv
+#include <termios.h> // ioctl, struct winsize
 #include <pty.h> // forkpty
 #include <rawrtc.h>
 #include "helper/utils.h"
@@ -14,6 +16,16 @@
 
 enum {
     PIPE_READ_BUFFER = 4096
+};
+
+// Control message types
+enum {
+    CONTROL_MESSAGE_WINDOW_SIZE_TYPE = 0
+};
+
+// Control message lengths
+enum {
+    CONTROL_MESSAGE_WINDOW_SIZE_LENGTH = 5
 };
 
 static char const ws_uri_regex[] = "ws:[^]*";
@@ -254,12 +266,69 @@ void data_channel_message_handler(
     (void) flags;
     DEBUG_PRINTF("(%s.%s) Received %zu bytes\n", client->name, channel->label, length);
 
-    // Write into PTY
-    // TODO: Handle EAGAIN?
-    DEBUG_PRINTF("(%s.%s) Piping %zu bytes into process...\n",
-                 client->name, channel->label, length);
-    EOP(write(client_channel->pty, mbuf_buf(buffer), length));
-    DEBUG_PRINTF("(%s.%s) ... completed!\n", client->name, channel->label);
+    if (flags & RAWRTC_DATA_CHANNEL_MESSAGE_FLAG_IS_BINARY) {
+        uint_fast8_t type;
+
+        // Check size
+        if (length < 1) {
+            DEBUG_WARNING("(%s.%s) Invalid control message of size %zu\n",
+                    client->name, channel->label, length);
+            return;
+        }
+
+        // Get type
+        type = mbuf_read_u8(buffer);
+
+        // Handle control message
+        switch (type) {
+            case CONTROL_MESSAGE_WINDOW_SIZE_TYPE:
+                // Check size
+                if (length < CONTROL_MESSAGE_WINDOW_SIZE_LENGTH) {
+                    DEBUG_WARNING("(%s.%s) Invalid window size message of size %zu\n",
+                            client->name, channel->label, length);
+                    return;
+                }
+                {
+                    uint_fast16_t columns;
+                    uint_fast16_t rows;
+                    struct winsize window_size = {0};
+
+                    // Get window size
+                    columns = ntohs(mbuf_read_u16(buffer));
+                    rows = ntohs(mbuf_read_u16(buffer));
+
+                    // Check window size
+#if (UINT16_MAX > USHRT_MAX)
+                    if (columns > USHRT_MAX || rows > USHRT_MAX) {
+                        DEBUG_WARNING("(%s.%s) Invalid window size value\n",
+                                      client->name, channel->label);
+                    }
+#endif
+
+                    // Set window size
+                    window_size.ws_col = (unsigned short) columns;
+                    window_size.ws_row = (unsigned short) rows;
+
+                    // Apply window size
+                    DEBUG_PRINTF("(%s.%s) Resizing terminal to %"PRIuFAST16" columns and "
+                            "%"PRIuFAST16" rows\n", client->name, channel->label, columns, rows);
+                    EOP(ioctl(client_channel->pty, TIOCSWINSZ, &window_size));
+                }
+
+                break;
+            default:
+                DEBUG_WARNING("(%s.%s) Unknown control message %"PRIuFAST8"\n",
+                              client->name, channel->label, length);
+                break;
+        }
+    } else {
+        // Write into PTY
+        // TODO: Handle EAGAIN?
+        DEBUG_PRINTF("(%s.%s) Piping %zu bytes into process...\n",
+                     client->name, channel->label, length);
+        EOP(write(client_channel->pty, mbuf_buf(buffer), length));
+        DEBUG_PRINTF("(%s.%s) ... completed!\n", client->name, channel->label);
+    }
 }
 
 /*
