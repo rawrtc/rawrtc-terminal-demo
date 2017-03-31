@@ -426,7 +426,9 @@ window.addEventListener('load', (event) => {
         removeTerminals() {
             // Remove all terminals
             for (let i = 0; i < this.terminals.length; ++i) {
-                this.removeTerminal(i);
+                if (this.terminals[i]) {
+                    this.removeTerminal(i);
+                }
             }
 
             // Reset list

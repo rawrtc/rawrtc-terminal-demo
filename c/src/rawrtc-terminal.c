@@ -416,7 +416,17 @@ static void pty_read_handler(
     // TODO: Handle EAGAIN?
     DEBUG_PRINTF("(%s.%s) Reading from process...\n", client->name, channel->label);
     length = read(client_channel->pty, mbuf_buf(buffer), mbuf_get_space(buffer));
-    EOP(length);
+    if (length == -1) {
+        switch (errno) {
+            case EIO:
+                // This happens when invoking 'exit' or similar commands
+                length = 0;
+                break;
+            default:
+                EOR(errno);
+                break;
+        }
+    }
     mbuf_set_end(buffer, (size_t) length);
     DEBUG_PRINTF("(%s.%s) ... read %zu bytes\n",
                  client->name, channel->label, mbuf_get_left(buffer));
