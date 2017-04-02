@@ -100,7 +100,7 @@ static void ws_close_handler(
 }
 
 /*
- * Parse the JSON encoded remote parameters and apply them.
+ * Receive the JSON encoded remote parameters, parse and apply them.
  */
 static void ws_receive_handler(
         struct websock_hdr const* header,
@@ -250,8 +250,8 @@ static void ice_gatherer_local_candidate_handler(
 }
 
 /*
- * Print the data channel's received message's size and echo the
- * message back.
+ * Write the received data channel message's data to the PTY (or handle
+ * a control message).
  */
 void data_channel_message_handler(
         struct mbuf* const buffer,
@@ -302,6 +302,7 @@ void data_channel_message_handler(
                     if (columns > USHRT_MAX || rows > USHRT_MAX) {
                         DEBUG_WARNING("(%s.%s) Invalid window size value\n",
                                       client->name, channel->label);
+                        return;
                     }
 #endif
 
