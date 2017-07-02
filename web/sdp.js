@@ -240,7 +240,7 @@ SDPUtils.getSctpCapabilities = function(mediaSection, sessionpart) {
   });
   // TODO: Use 65536 once browsers have fixed their implementations,
   //       see: https://lgrahl.de/articles/demystifying-webrtc-dc-size-limit.html
-  maxMessageSize = maxMessageSize.length ? maxMessageSize[0].substr(19) : 16384;
+  maxMessageSize = maxMessageSize.length ? parseInt(maxMessageSize[0].substr(19)) : 16384;
   return {
     maxMessageSize: maxMessageSize
   };
