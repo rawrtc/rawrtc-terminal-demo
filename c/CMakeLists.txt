@@ -27,13 +27,13 @@ set(rawrtc_terminal_DEP_LIBRARIES)
 
 # Dependency: libre
 pkg_check_modules(LIB_RE REQUIRED "libre >= 0.5.0")
-include_directories(${LIB_RE_STATIC_INCLUDE_DIRS})
+include_directories(${LIB_RE_STATIC_INCLUDE_DIRS} ${LIB_RE_STATIC_INCLUDEDIR})
 link_directories(${LIB_RE_STATIC_LIBRARY_DIRS})
 list(APPEND rawrtc_terminal_DEP_LIBRARIES ${LIB_RE_STATIC_LIBRARIES})
 
 # Dependency: librawrtc
 pkg_check_modules(LIB_RAWRTC REQUIRED "librawrtc >= 0.0.1")
-include_directories(${LIB_RAWRTC_INCLUDE_DIRS})
+include_directories(${LIB_RAWRTC_INCLUDE_DIRS} ${LIB_RAWRTC_STATIC_INCLUDEDIR})
 link_directories(${LIB_RAWRTC_LIBRARY_DIRS})
 list(APPEND rawrtc_terminal_DEP_LIBRARIES ${LIB_RAWRTC_LIBRARIES})
 
