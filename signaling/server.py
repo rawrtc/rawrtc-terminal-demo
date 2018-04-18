@@ -108,7 +108,8 @@ class Server:
     def handler(self, connection, path):
         # Get slot from path
         try:
-            _, path, slot = path.split('/')
+            _, path = path.split('/', maxsplit=1)
+            path, slot = path.rsplit('/', maxsplit=1)
             slot = int(slot)
             if slot > 1:
                 raise ValueError()
