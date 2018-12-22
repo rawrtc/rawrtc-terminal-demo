@@ -36,3 +36,6 @@
 
 # Build folder
 /c/build*
+
+# NodeJS
+/web/node_modules
