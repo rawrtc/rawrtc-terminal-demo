@@ -129,9 +129,9 @@ void set_dtls_parameters(
 
     // Get and set fingerprints
     EOE(rawrtc_dtls_parameters_get_fingerprints(&fingerprints, parameters));
-    for (i = 0; i < parameters->fingerprints->n_fingerprints; ++i) {
+    for (i = 0; i < fingerprints->n_fingerprints; ++i) {
         struct rawrtc_dtls_fingerprint* const fingerprint =
-                parameters->fingerprints->fingerprints[i];
+                fingerprints->fingerprints[i];
         enum rawrtc_certificate_sign_algorithm sign_algorithm;
         char* value;
         char* key;
@@ -140,8 +140,8 @@ void set_dtls_parameters(
         EOR(odict_alloc(&node, 16));
 
         // Get values
-        EOE(rawrtc_dtls_parameters_fingerprint_get_sign_algorithm(&sign_algorithm, fingerprint));
-        EOE(rawrtc_dtls_parameters_fingerprint_get_value(&value, fingerprint));
+        EOE(rawrtc_dtls_fingerprint_get_sign_algorithm(&sign_algorithm, fingerprint));
+        EOE(rawrtc_dtls_fingerprint_get_value(&value, fingerprint));
 
         // Set fingerprint values
         EOR(odict_entry_add(node, "algorithm", ODICT_STRING,
