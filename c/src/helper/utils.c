@@ -1,5 +1,6 @@
 #include <stdlib.h> // strtol
 #include <string.h> // strlen
+#include <limits.h>
 #include <rawrtc.h>
 #include "common.h"
 #include "utils.h"
